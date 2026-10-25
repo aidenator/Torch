@@ -135,7 +135,7 @@ void LUS::BinaryWriter::Write(double value) {
 
 void LUS::BinaryWriter::Write(const std::string& str, bool writeLength) {
     if(writeLength){
-        int strLen = str.size();
+        int32_t strLen = str.size();
         Write(strLen);
     }
     for (char c : str) {

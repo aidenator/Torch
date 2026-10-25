@@ -241,10 +241,20 @@ if (BUILD_STORMLIB)
     add_definitions(-DUSE_STORMLIB)
 endif()
 
+if(NINTENDO_3DS)
+    # newlib only declares fseeko/ftello (used by miniz) with the POSIX extensions on
+    target_compile_definitions(${PROJECT_NAME} PRIVATE _GNU_SOURCE)
+endif()
+
 if(NOT MSVC)
     set(CMAKE_CXX_FLAGS_DEBUG "-g")
     set(CMAKE_CXX_FLAGS_RELEASE "-O3")
-    set(CMAKE_CXX_FLAGS "-Wno-narrowing")
+    if(NINTENDO_3DS)
+        # Keep the toolchain's flags (hard-float ABI, CPU): code built without them will not link
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
+    else()
+        set(CMAKE_CXX_FLAGS "-Wno-narrowing")
+    endif()
 else()
     target_compile_options(${PROJECT_NAME} PRIVATE
         $<$<CONFIG:Debug>:

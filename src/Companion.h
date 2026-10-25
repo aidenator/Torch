@@ -193,7 +193,7 @@ public:
     GBIVersion GetGBIVersion() const { return this->gConfig.gbi.version; }
     GBIMinorVersion GetGBIMinorVersion() const { return  this->gConfig.gbi.subversion; }
     std::unordered_map<std::string, std::vector<YAML::Node>> GetCourseMetadata() { return this->gCourseMetadata; }
-    std::optional<std::string> GetEnumFromValue(const std::string& key, int id);
+    std::optional<std::string> GetEnumFromValue(const std::string& key, int32_t id);
     bool IsUsingIndividualIncludes() const { return this->gIndividualIncludes; }
 
     std::optional<ParseResultData> GetParseDataByAddr(uint32_t addr);

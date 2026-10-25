@@ -256,7 +256,7 @@ ExportResult DListBinaryExporter::Export(std::ostream& write, std::shared_ptr<IP
 
     auto bhash = CRC64((*replacement).c_str());
     writer.Write(static_cast<uint32_t>((G_MARKER << 24)));
-    writer.Write(0xBEEFBEEF);
+    writer.Write(static_cast<uint32_t>(0xBEEFBEEF));
     writer.Write(static_cast<uint32_t>(bhash >> 32));
     writer.Write(static_cast<uint32_t>(bhash & 0xFFFFFFFF));
 
