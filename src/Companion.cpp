@@ -447,14 +447,17 @@ void Companion::ParseEnums(std::string& header) {
 std::optional<ParseResultData> Companion::ParseNode(YAML::Node& node, std::string& name) {
     auto type = GetTypeNode(node);
 
-    spdlog::set_pattern(regular);
-    if (node["offset"]) {
-        auto offset = node["offset"].as<uint32_t>();
-        SPDLOG_INFO("- [{}] Processing {} at 0x{:X}", type, name, offset);
-    } else {
-        SPDLOG_INFO("- [{}] Processing {}", type, name);
+    // Changing the pattern rebuilds the formatter, which is slow on the 3DS, so only when logging
+    if (spdlog::should_log(spdlog::level::info)) {
+        spdlog::set_pattern(regular);
+        if (node["offset"]) {
+            auto offset = node["offset"].as<uint32_t>();
+            SPDLOG_INFO("- [{}] Processing {} at 0x{:X}", type, name, offset);
+        } else {
+            SPDLOG_INFO("- [{}] Processing {}", type, name);
+        }
+        spdlog::set_pattern(line);
     }
-    spdlog::set_pattern(line);
     node["vpath"] = name;
 
     auto factory = this->GetFactory(type);
@@ -873,9 +876,11 @@ void Companion::ProcessParseFile(YAML::Node root, std::atomic<size_t>& assetCoun
             this->gParseResults[this->gCurrentFile].push_back(result.value());
         }
 
-        spdlog::set_pattern(regular);
-        SPDLOG_INFO("------------------------------------------------");
-        spdlog::set_pattern(line);
+        if (spdlog::should_log(spdlog::level::info)) {
+            spdlog::set_pattern(regular);
+            SPDLOG_INFO("------------------------------------------------");
+            spdlog::set_pattern(line);
+        }
     }
 }
 
@@ -1315,9 +1320,11 @@ void Companion::ProcessFile(YAML::Node root, std::atomic<size_t>& assetCount) {
         return;
     }
 
-    spdlog::set_pattern(regular);
-    SPDLOG_INFO("------------------------------------------------");
-    spdlog::set_pattern(line);
+    if (spdlog::should_log(spdlog::level::info)) {
+        spdlog::set_pattern(regular);
+        SPDLOG_INFO("------------------------------------------------");
+        spdlog::set_pattern(line);
+    }
 
     ProcessParseFile(root, assetCount);
 
@@ -1984,9 +1991,11 @@ std::optional<std::tuple<std::string, YAML::Node>> Companion::RegisterAsset(cons
     if (dResult.has_value()) {
         this->gParseResults[this->gCurrentFile].push_back(dResult.value());
     }
-    spdlog::set_pattern(regular);
-    SPDLOG_INFO("------------------------------------------------");
-    spdlog::set_pattern(line);
+    if (spdlog::should_log(spdlog::level::info)) {
+        spdlog::set_pattern(regular);
+        SPDLOG_INFO("------------------------------------------------");
+        spdlog::set_pattern(line);
+    }
 
     return entry;
 }
@@ -2565,11 +2574,16 @@ std::optional<YAML::Node> Companion::AddSubFileAsset(YAML::Node asset, std::stri
     if (StreamsSubFiles()) {
         auto oldDirectory = this->gCurrentDirectory;
         this->gCurrentDirectory = oldDirectory / newFileName;
+        // The sub-file was counted when it was parsed; counting its export too would run the
+        // extractor's progress past its total
+        auto* counter = this->gAssetCounter;
+        this->gAssetCounter = nullptr;
         try {
             ProcessExportFile();
         } catch (const std::exception& e) {
             SPDLOG_ERROR("Sub-file export failed {}: {}", newFileName, e.what());
         } catch (...) { SPDLOG_ERROR("Sub-file export crashed {}", newFileName); }
+        this->gAssetCounter = counter;
         this->gProcessedFiles.insert(newFileName);
         this->gParseResults.erase(newFileName);
         this->gAddrMap.erase(newFileName);

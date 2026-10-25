@@ -400,6 +400,7 @@ std::optional<std::shared_ptr<IParsedData>> BKAssetFactory::parse(std::vector<ui
     size_t parseFailures = 0;
 
     for (uint32_t i = 0; i < assetCount - 1; i++) {
+        Companion::Instance->ReportProgress(i, assetCount - 1);
         try {
             auto assetInfo = assetTableInfo.at(i);
 

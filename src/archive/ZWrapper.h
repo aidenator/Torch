@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <cstdio>
 #include <vector>
 #include <string>
 #include "BinaryWrapper.h"
@@ -16,7 +18,17 @@ public:
     int32_t Close(void) override;
 
 private:
-    // Entries go straight to the file as they are added, so the archive is never held in memory
+    // offset is miniz's mz_uint64
+    static size_t WriteAt(void* opaque, unsigned long long offset, const void* buffer, size_t size);
+    bool FlushFinished(uint64_t limit);
+
+    static constexpr size_t kBlockSize = 1024 * 1024;
+
+    // Entries go to the file as they are added, so the archive is never held in memory
     mz_zip_archive_tag* mArchive = nullptr;
+    FILE* mFile = nullptr;
     unsigned int mLevel;
+    // The archive from mWindowStart (always a multiple of kBlockSize) on, not yet written
+    std::vector<char> mWindow;
+    uint64_t mWindowStart = 0;
 };

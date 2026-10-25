@@ -2,6 +2,9 @@
 #include <filesystem>
 #include <iostream>
 #include <fstream>
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
 
 #include "spdlog/spdlog.h"
 #include <Companion.h>
@@ -19,15 +22,67 @@ ZWrapper::~ZWrapper() {
         mz_zip_writer_end(this->mArchive);
         delete this->mArchive;
     }
+    if (this->mFile != nullptr) {
+        fclose(this->mFile);
+    }
+}
+
+// miniz writes each entry's data first and then seeks back to fill in its header, and the C
+// library flushes its buffer on every seek. Where each write is a slow request to the file system
+// that makes tens of thousands of tiny writes, and the 3DS's SD card is also very slow at writes
+// that do not start and end on a block boundary. So the archive is kept in memory from the last
+// written block on, and goes to the file only in whole aligned blocks, once nothing in them can
+// change (see FlushFinished).
+size_t ZWrapper::WriteAt(void* opaque, unsigned long long offset, const void* buffer, size_t size) {
+    auto* self = static_cast<ZWrapper*>(opaque);
+    if (offset < self->mWindowStart) {
+        // Already written; miniz only seeks back within the entry it is adding, so this does not happen
+        SPDLOG_ERROR("[ZWrapper] Write at 0x{:X} is before the unwritten part (0x{:X})", offset, self->mWindowStart);
+        return 0;
+    }
+    const size_t at = offset - self->mWindowStart;
+    if (at + size > self->mWindow.size()) {
+        self->mWindow.resize(at + size);
+    }
+    memcpy(self->mWindow.data() + at, buffer, size);
+    return size;
+}
+
+// Writes the whole blocks below `limit`, everything before which is final
+bool ZWrapper::FlushFinished(uint64_t limit) {
+    size_t blocks = 0;
+    while (this->mWindowStart + (blocks + 1) * kBlockSize <= limit &&
+           (blocks + 1) * kBlockSize <= this->mWindow.size()) {
+        blocks++;
+    }
+    if (blocks == 0) {
+        return true;
+    }
+    const size_t bytes = blocks * kBlockSize;
+    const bool ok = fseeko(this->mFile, this->mWindowStart, SEEK_SET) == 0 &&
+                    fwrite(this->mWindow.data(), 1, bytes, this->mFile) == bytes;
+    this->mWindow.erase(this->mWindow.begin(), this->mWindow.begin() + bytes);
+    this->mWindowStart += bytes;
+    return ok;
 }
 
 int32_t ZWrapper::CreateArchive() {
-    this->mArchive = new mz_zip_archive();
-    if (!mz_zip_writer_init_file(this->mArchive, this->mPath.c_str(), 0)) {
+    this->mFile = fopen(this->mPath.c_str(), "wb");
+    if (this->mFile == nullptr) {
         SPDLOG_ERROR("[ZWrapper] Could not create {}", this->mPath);
+        throw std::runtime_error("Could not create " + this->mPath);
+    }
+    // Writes already arrive in large blocks
+    setvbuf(this->mFile, nullptr, _IONBF, 0);
+    this->mWindow.reserve(2 * kBlockSize);
+    this->mArchive = new mz_zip_archive();
+    this->mArchive->m_pWrite = WriteAt;
+    this->mArchive->m_pIO_opaque = this;
+    if (!mz_zip_writer_init(this->mArchive, 0)) {
+        SPDLOG_ERROR("[ZWrapper] Could not start {}", this->mPath);
         delete this->mArchive;
         this->mArchive = nullptr;
-        throw std::runtime_error("Could not create " + this->mPath);
+        throw std::runtime_error("Could not start " + this->mPath);
     }
     SPDLOG_INFO("Loaded ZIP (O2R) archive: {}", mPath.c_str());
     return 0;
@@ -53,6 +108,11 @@ bool ZWrapper::AddFile(const std::string& path, std::vector<char> data) {
         SPDLOG_ERROR("[ZWrapper] Failed to add '{}' ({} bytes)", path, fileSize);
         throw std::runtime_error("write error");
     }
+    // Nothing before the end of the archive changes again
+    if (!this->FlushFinished(this->mArchive->m_archive_size)) {
+        SPDLOG_ERROR("[ZWrapper] Failed to write {}", this->mPath);
+        throw std::runtime_error("write error");
+    }
     return true;
 }
 
@@ -60,10 +120,18 @@ int32_t ZWrapper::Close(void) {
     if (this->mArchive == nullptr) {
         return -1;
     }
-    const bool ok = mz_zip_writer_finalize_archive(this->mArchive);
+    bool ok = mz_zip_writer_finalize_archive(this->mArchive);
     mz_zip_writer_end(this->mArchive);
     delete this->mArchive;
     this->mArchive = nullptr;
+    // The rest, including the unaligned end
+    if (!this->mWindow.empty()) {
+        ok = fseeko(this->mFile, this->mWindowStart, SEEK_SET) == 0 &&
+             fwrite(this->mWindow.data(), 1, this->mWindow.size(), this->mFile) == this->mWindow.size() && ok;
+    }
+    ok = fclose(this->mFile) == 0 && ok;
+    this->mFile = nullptr;
+    std::vector<char>().swap(this->mWindow);
     if (!ok) {
         SPDLOG_ERROR("[ZWrapper] Could not finish {}", this->mPath);
         return -1;

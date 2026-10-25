@@ -242,6 +242,13 @@ public:
     std::string GetCurrentAssetName() const { return this->gCurrentAssetName; }
     void SetAssetTotal(std::atomic<size_t>* total) { this->gAssetTotal = total; }
     void SetPhaseCallback(std::function<void(int)> cb) { this->gPhaseCallback = cb; }
+    // Called as the asset table is worked through, with the entries done and the total (BK64)
+    void SetProgressCallback(std::function<void(size_t, size_t)> callback) { this->gProgressCallback = std::move(callback); }
+    void ReportProgress(size_t done, size_t total) {
+        if (this->gProgressCallback) {
+            this->gProgressCallback(done, total);
+        }
+    }
 
     void SetProcess(bool shouldProcess);
     TorchConfig& GetConfig() { return this->gConfig; }
@@ -299,6 +306,7 @@ private:
     std::atomic<size_t>* gAssetCounter = nullptr;
     std::atomic<size_t>* gAssetTotal = nullptr;
     std::function<void(int)> gPhaseCallback;
+    std::function<void(size_t, size_t)> gProgressCallback;
     std::string gCurrentFile;
     std::vector<std::string> gSubFileList;
     std::string gCurrentVirtualPath;
