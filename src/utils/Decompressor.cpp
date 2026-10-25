@@ -271,6 +271,17 @@ DecompressedData Decompressor::AutoDecode(YAML::Node& node, std::vector<uint8_t>
             }
 
             auto availableSize = buffer.size() - fileOffset;
+            // Inside an uncompressed sub-file, the data ends where the sub-file does. Without this
+            // the segment runs to the end of the ROM, and readers copy all of it: megabytes for
+            // each small asset, which on the 3DS can fail for want of a large enough free block.
+            const auto subFileSize = Companion::Instance->GetCurrentSubFileSize();
+            const auto vram = Companion::Instance->GetCurrentVRAM();
+            if (subFileSize.has_value() && vram.has_value() && fileOffset >= vram->offset) {
+                const size_t subFileEnd = static_cast<size_t>(vram->offset) + subFileSize.value();
+                if (subFileEnd > fileOffset && subFileEnd - fileOffset < availableSize) {
+                    availableSize = subFileEnd - fileOffset;
+                }
+            }
             size_t size;
 
             if (node["size"]) {

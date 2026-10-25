@@ -224,6 +224,8 @@ public:
     std::uint32_t GetCurrSegmentNumber(void) const { return this->gCurrentSegmentNumber; };
     CompressionType GetCurrCompressionType(void) const { return this->gCurrentCompressionType; };
     std::optional<std::uint32_t> GetCurrentCompressedSize(void) const { return this->gCurrentCompressedSize; };
+    // Size in the ROM of the uncompressed sub-file being parsed, when known (see AutoDecode)
+    std::optional<std::uint32_t> GetCurrentSubFileSize(void) const { return this->gCurrentSubFileSize; };
     std::optional<VRAMEntry> GetCurrentVRAM(void) const { return this->gCurrentVram; };
     std::optional<Table> SearchTable(uint32_t addr);
 
@@ -244,6 +246,9 @@ public:
     void SetPhaseCallback(std::function<void(int)> cb) { this->gPhaseCallback = cb; }
     // Called as the asset table is worked through, with the entries done and the total (BK64)
     void SetProgressCallback(std::function<void(size_t, size_t)> callback) { this->gProgressCallback = std::move(callback); }
+    // Assets that failed to parse or export; the archive is incomplete when this is above 0
+    void CountFailure() { this->gFailures++; }
+    size_t GetFailures() const { return this->gFailures; }
     void ReportProgress(size_t done, size_t total) {
         if (this->gProgressCallback) {
             this->gProgressCallback(done, total);
@@ -307,6 +312,7 @@ private:
     std::atomic<size_t>* gAssetTotal = nullptr;
     std::function<void(int)> gPhaseCallback;
     std::function<void(size_t, size_t)> gProgressCallback;
+    size_t gFailures = 0;
     std::string gCurrentFile;
     std::vector<std::string> gSubFileList;
     std::string gCurrentVirtualPath;
@@ -319,6 +325,7 @@ private:
     std::optional<VRAMEntry> gCurrentVram;
     CompressionType gCurrentCompressionType = CompressionType::None;
     std::optional<std::uint32_t> gCurrentCompressedSize;
+    std::optional<std::uint32_t> gCurrentSubFileSize;
     std::vector<Table> gTables;
     std::vector<std::string> gCurrentExternalFiles;
     std::unordered_map<int, std::string> gManualSegments;

@@ -2554,6 +2554,7 @@ std::optional<YAML::Node> Companion::AddSubFileAsset(YAML::Node asset, std::stri
     auto oldVram = this->gCurrentVram;
     auto oldCompressionType = this->gCurrentCompressionType;
     auto oldCompressedSize = this->gCurrentCompressedSize;
+    auto oldSubFileSize = this->gCurrentSubFileSize;
     this->gSubFileList.push_back(newFileName);
     this->gCurrentAssetName = "Parsing: " + newFileName;
     if (this->gAssetCounter) {
@@ -2565,6 +2566,10 @@ std::optional<YAML::Node> Companion::AddSubFileAsset(YAML::Node asset, std::stri
     this->gCurrentCompressionType = newCompressionType;
     if (newCompressionType == CompressionType::BKZIP) {
         this->gCurrentCompressedSize = compressedSize;
+    }
+    this->gCurrentSubFileSize = std::nullopt;
+    if (newCompressionType == CompressionType::None && compressedSize > 0) {
+        this->gCurrentSubFileSize = compressedSize;
     }
 
     auto result = this->AddAsset(asset);
@@ -2581,8 +2586,12 @@ std::optional<YAML::Node> Companion::AddSubFileAsset(YAML::Node asset, std::stri
         try {
             ProcessExportFile();
         } catch (const std::exception& e) {
+            this->CountFailure();
             SPDLOG_ERROR("Sub-file export failed {}: {}", newFileName, e.what());
-        } catch (...) { SPDLOG_ERROR("Sub-file export crashed {}", newFileName); }
+        } catch (...) {
+            this->CountFailure();
+            SPDLOG_ERROR("Sub-file export crashed {}", newFileName);
+        }
         this->gAssetCounter = counter;
         this->gProcessedFiles.insert(newFileName);
         this->gParseResults.erase(newFileName);
@@ -2597,6 +2606,7 @@ std::optional<YAML::Node> Companion::AddSubFileAsset(YAML::Node asset, std::stri
     this->gCurrentVram = oldVram;
     this->gCurrentCompressionType = oldCompressionType;
     this->gCurrentCompressedSize = oldCompressedSize;
+    this->gCurrentSubFileSize = oldSubFileSize;
 
     return result;
 }

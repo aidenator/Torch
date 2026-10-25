@@ -612,6 +612,7 @@ std::optional<std::shared_ptr<IParsedData>> BKAssetFactory::parse(std::vector<ui
             }
         } catch (const std::exception& e) {
             parseFailures++;
+            Companion::Instance->CountFailure();
             const auto& bad = assetTableInfo.at(i);
             SPDLOG_ERROR("[BKAssetFactory] skipping slot {} (compFlag={} tFlag={} mode={} offset=0x{:X}): {}", i,
                          bad.compressionFlag, bad.tFlag, bad.assetMode, dataStartRomOffset + bad.offset, e.what());
