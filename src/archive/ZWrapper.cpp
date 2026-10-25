@@ -12,6 +12,15 @@
 
 namespace fs = std::filesystem;
 
+// fseeko is POSIX; MSVC's 64-bit seek is _fseeki64
+static int SeekTo(FILE* file, uint64_t offset, int origin) {
+#ifdef _WIN32
+    return _fseeki64(file, (__int64)offset, origin);
+#else
+    return fseeko(file, (off_t)offset, origin);
+#endif
+}
+
 ZWrapper::ZWrapper(const std::string& path, bool storeUncompressed) {
     this->mPath = path;
     this->mLevel = storeUncompressed ? MZ_NO_COMPRESSION : MZ_BEST_COMPRESSION;
@@ -59,7 +68,7 @@ bool ZWrapper::FlushFinished(uint64_t limit) {
         return true;
     }
     const size_t bytes = blocks * kBlockSize;
-    const bool ok = fseeko(this->mFile, this->mWindowStart, SEEK_SET) == 0 &&
+    const bool ok = SeekTo(this->mFile, this->mWindowStart, SEEK_SET) == 0 &&
                     fwrite(this->mWindow.data(), 1, bytes, this->mFile) == bytes;
     this->mWindow.erase(this->mWindow.begin(), this->mWindow.begin() + bytes);
     this->mWindowStart += bytes;
@@ -126,7 +135,7 @@ int32_t ZWrapper::Close(void) {
     this->mArchive = nullptr;
     // The rest, including the unaligned end
     if (!this->mWindow.empty()) {
-        ok = fseeko(this->mFile, this->mWindowStart, SEEK_SET) == 0 &&
+        ok = SeekTo(this->mFile, this->mWindowStart, SEEK_SET) == 0 &&
              fwrite(this->mWindow.data(), 1, this->mWindow.size(), this->mFile) == this->mWindow.size() && ok;
     }
     ok = fclose(this->mFile) == 0 && ok;
