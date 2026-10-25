@@ -10,6 +10,7 @@
 
 #include <optional>
 #include <ostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -110,19 +111,21 @@ inline std::vector<DialogString> ReadModdingDialogSeq(const YAML::Node& seq) {
     return entries;
 }
 
-// Parse a modding-yaml buffer and return the asset's value node (the map under its symbol).
-inline std::optional<YAML::Node> LoadModdingRoot(const std::vector<uint8_t>& buffer) {
-    try {
-        std::string text((char*)buffer.data(), buffer.size());
-        YAML::Node assetNode = YAML::Load(text.c_str());
-        return assetNode.begin()->second;
-    } catch (YAML::ParserException& e) {
-        SPDLOG_ERROR("Failed to parse message data: {}", e.what());
-        SPDLOG_ERROR("{}", (char*)buffer.data());
-        return std::nullopt;
+inline constexpr const char* kPalExtraLangs[] = { "French", "German" };
+inline std::vector<YAML::Node> ReadPalExtraLangs(const YAML::Node& info, const std::string& symbol, const char* kind) {
+    const bool french = static_cast<bool>(info[kPalExtraLangs[0]]);
+    const bool german = static_cast<bool>(info[kPalExtraLangs[1]]);
+    if (french != german) {
+        throw std::runtime_error(fmt::format("BK64 {}: {} has {} but no {}; give it both or neither", kind, symbol,
+                                             kPalExtraLangs[french ? 0 : 1], kPalExtraLangs[french ? 1 : 0]));
     }
+    if (!french) {
+        return {};
+    }
+    return { info[kPalExtraLangs[0]], info[kPalExtraLangs[1]] };
 }
 
+// Parse a modding-yaml buffer and return the asset's value node (the map under its symbol).
 // Both question types share a container. Header byte 0 is the language count, followed
 // by one LE u16 start offset per language. US has a single language, so its offset table
 // is the lone `05 00` and the question begins right after it; PAL carries three, with

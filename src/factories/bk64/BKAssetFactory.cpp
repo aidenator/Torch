@@ -7,6 +7,8 @@
 #include "TinySHA1.hpp"
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <thread>
 #include <mutex>
@@ -114,19 +116,16 @@ ExportResult BKAssetBinaryExporter::Export(std::ostream& write, std::shared_ptr<
     // Format: u32 count, then per entry: u32 assetId, s32 pathLen, char
     // path[pathLen]
     std::vector<std::pair<uint32_t, std::string>> entries;
-    entries.reserve(assetTable->mSymbolMap.size() + assetTable->mAssetTableInfo.size());
+    entries.reserve(assetTable->mSymbolMap.size() + assetTable->mEmptyIds.size());
     size_t payloadSize = 4;
     for (const auto& [id, symbol] : assetTable->mSymbolMap) {
         std::string fullPath = prefix + symbol;
         payloadSize += 4 + 4 + fullPath.size();
         entries.emplace_back(id, std::move(fullPath));
     }
-    for (const auto& assetInfo : assetTable->mAssetTableInfo) {
-        if (assetInfo.tFlag != 4) {
-            continue; // only the empty slots; real assets are already in mSymbolMap
-        }
+    for (const uint32_t id : assetTable->mEmptyIds) {
         payloadSize += 4 + 4; // id + zero-length path
-        entries.emplace_back(static_cast<uint32_t>(assetInfo.index), std::string());
+        entries.emplace_back(id, std::string());
     }
     writer.Write(static_cast<uint32_t>(payloadSize));
 
@@ -162,7 +161,7 @@ static void EmitLangInfo(const std::vector<std::tuple<std::string, uint32_t, uin
         putU32(static_cast<uint32_t>(s.size()));
         data.insert(data.end(), s.begin(), s.end());
     };
-    putU32(1); // format version
+    putU32(2); // format version
     putU32(static_cast<uint32_t>(langs.size()));
     for (const auto& [name, index, script] : langs) {
         putU32(index);
@@ -282,6 +281,37 @@ std::optional<std::shared_ptr<IParsedData>> BKAssetFactory::parse(std::vector<ui
     bool symbolMapExists = false;
     if (node["symbol_map"]) {
         symbolMapExists = true;
+    }
+    std::unordered_map<uint32_t, uint32_t> v10Ids;
+    std::unordered_set<uint32_t> leftOut;
+    if (node["ids"]) {
+        for (const auto& entry : node["ids"]) {
+            if (entry.second.IsNull()) {
+                leftOut.insert(entry.first.as<uint32_t>());
+            } else {
+                v10Ids[entry.first.as<uint32_t>()] = entry.second.as<uint32_t>();
+            }
+        }
+    }
+    const auto v10Id = [&v10Ids](uint32_t slot) {
+        const auto it = v10Ids.find(slot);
+        return it != v10Ids.end() ? it->second : slot;
+    };
+    std::unordered_map<uint32_t, std::string> sharedNames;
+    if (node["names"]) {
+        const auto file = fs::path(Companion::Instance->GetAssetPath()) / node["names"].as<std::string>();
+        for (const auto& entry : YAML::LoadFile(file.string())) {
+            const YAML::Node table = entry.second;
+            if (!table["type"] || table["type"].as<std::string>() != "BK64:ASSET_TABLE") {
+                continue;
+            }
+            // region_names holds the assets only other revisions have
+            for (const char* key : { "symbol_map", "region_names" }) {
+                for (const auto& name : table[key]) {
+                    sharedNames[name.first.as<uint32_t>()] = name.second.as<std::string>();
+                }
+            }
+        }
     }
 
     // Emit the pack-level langinfo once, from the asset table: a yaml-declared
@@ -409,7 +439,7 @@ std::optional<std::shared_ptr<IParsedData>> BKAssetFactory::parse(std::vector<ui
             auto assetOffset = dataStartRomOffset + assetInfo.offset;
             BKAssetType assetType;
 
-            if (assetInfo.tFlag == 4) {
+            if (assetInfo.tFlag == 4 || leftOut.count(assetInfo.index)) {
                 continue;
             }
 
@@ -541,6 +571,8 @@ std::optional<std::shared_ptr<IParsedData>> BKAssetFactory::parse(std::vector<ui
 
             if (symbolMapExists && node["symbol_map"][assetIndexStr]) {
                 assetSymbol = node["symbol_map"][assetIndexStr].as<std::string>();
+            } else if (const auto shared = sharedNames.find(v10Id(assetInfo.index)); shared != sharedNames.end()) {
+                assetSymbol = shared->second;
             } else {
                 std::stringstream assetStream;
 
@@ -553,7 +585,7 @@ std::optional<std::shared_ptr<IParsedData>> BKAssetFactory::parse(std::vector<ui
                 assetSymbol = "lang/" + langRegion + "/" + assetSymbol;
             }
 
-            symbolMap[assetInfo.index] = assetSymbol;
+            symbolMap[v10Id(assetInfo.index)] = assetSymbol;
 
             YAML::Node bkAssetNode;
             bkAssetNode["offset"] = assetOffset;
@@ -592,6 +624,7 @@ std::optional<std::shared_ptr<IParsedData>> BKAssetFactory::parse(std::vector<ui
                     break;
                 case BKAssetType::Model:
                     bkAssetNode["type"] = "BK64:MODEL";
+                    bkAssetNode["asset_id"] = assetInfo.index;
                     Companion::Instance->AddSubFileAsset(bkAssetNode, assetSymbol, compressionType, assetSize);
                     break;
                 case BKAssetType::QuizQuestion:
@@ -624,6 +657,22 @@ std::optional<std::shared_ptr<IParsedData>> BKAssetFactory::parse(std::vector<ui
                     skipHits, skipMisses, parseFailures);
     } else if (parseFailures > 0) {
         SPDLOG_WARN("[BKAssetFactory] {} slot(s) failed to parse and were skipped", parseFailures);
+    }
+
+    std::vector<uint32_t> emptyIds;
+    for (const auto& assetInfo : assetTableInfo) {
+        if (assetInfo.tFlag == 4 && !leftOut.count(assetInfo.index)) {
+            emptyIds.push_back(v10Id(assetInfo.index));
+        }
+    }
+
+    if (node["aliases"]) {
+        for (const auto& entry : node["aliases"]) {
+            const auto target = symbolMap.find(entry.second.as<uint32_t>());
+            if (target != symbolMap.end()) {
+                symbolMap[entry.first.as<uint32_t>()] = target->second;
+            }
+        }
     }
 
     // Additive lang assets: slots the base ROM leaves empty but a pack fills via an
@@ -713,12 +762,44 @@ std::optional<std::shared_ptr<IParsedData>> BKAssetFactory::parse(std::vector<ui
         romName = (dot != std::string::npos) ? filename.substr(0, dot) : filename;
     }
     std::vector<char> configBlob = BuildGameConfigBlob(buffer, romName);
+    const auto& config = Companion::Instance->GetConfig();
+    const auto& modded = Companion::Instance->GetModdedAssetPaths();
+    if (const auto listed = modded.find(GAMECONFIG_MODDING_NAME);
+        config.modding && config.exporterType != ExportType::Modding && listed != modded.end()) {
+        const std::filesystem::path path = std::filesystem::path(config.moddingPath) / listed->second;
+        std::ifstream input(path, std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+        GameConfigData parsed;
+        std::string error;
+        if (!input || !GameConfigFromYaml(text, parsed, error)) {
+            throw std::runtime_error(listed->second + ": " + (input ? error : "couldn't read it"));
+        }
+        if (parsed.romName.empty()) {
+            parsed.romName = romName;
+        }
+        configBlob = WriteGameConfig(parsed);
+    }
+    if (!configBlob.empty() && config.exporterType == ExportType::Modding) {
+        GameConfigData parsed;
+        std::string error;
+        if (ReadGameConfig(configBlob, parsed, error)) {
+            // Named after the modding folder here; a build names it after its own output.
+            parsed.romName.clear();
+            const std::string file = std::string(GAMECONFIG_MODDING_NAME) + ".yaml";
+            const std::filesystem::path path = std::filesystem::path(Companion::Instance->GetOutputPath()) / file;
+            std::filesystem::create_directories(path.parent_path());
+            std::ofstream(path, std::ios::binary) << GameConfigToYaml(parsed);
+            Companion::Instance->RegisterModdedAsset(GAMECONFIG_MODDING_NAME, file);
+        } else {
+            SPDLOG_ERROR("aGameConfig: {}", error);
+        }
+    }
     if (!configBlob.empty()) {
         SPDLOG_INFO("BB romhack config detected ({} bytes), writing to o2r as '{}'", configBlob.size(), romName);
         Companion::Instance->RegisterCompanionFile("aGameConfig", configBlob);
     }
 
-    return std::make_shared<BKAssetData>(assetTableInfo, symbolMap);
+    return std::make_shared<BKAssetData>(assetTableInfo, symbolMap, emptyIds);
 }
 
 // Route a dialog-pack build to mods/~lang/bk<region>.o2r when no explicit binary name is
