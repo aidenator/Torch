@@ -115,6 +115,8 @@ struct TorchConfig {
     bool strictDeclarations;
     bool includeAutogen;
     bool dialogPack = false;
+    // O2R only: store archive entries uncompressed (faster to write and read, about twice the size)
+    bool storeUncompressed = false;
     // Default model-preview shading mode name (e.g. "textured + lit"); empty
     // uses each viewer's built-in fallback. See UI::ShadeSetupIndexByName.
     std::string defaultShading;
@@ -246,6 +248,11 @@ public:
     const YAML::Node& GetCurrentFileConfig() const { return this->gCurrentFileConfig; }
     const std::string& GetCurrentModdingSource() const { return this->gCurrentModdingSource; }
     BinaryWrapper* GetCurrentWrapper() { return this->gCurrentWrapper; }
+    // True when each sub-file is written and freed as soon as it is parsed (see AddSubFileAsset)
+    bool StreamsSubFiles() const {
+        return this->gStreamSubFiles && mShouldProcess && this->gConfig.exporterType == ExportType::Binary &&
+               this->gCurrentWrapper != nullptr;
+    }
     const std::unordered_map<std::string, std::string>& GetModdedAssetPaths() const { return this->gModdedAssetPaths; }
 
     std::optional<std::tuple<std::string, YAML::Node>> RegisterAsset(const std::string& name, YAML::Node& node);
@@ -308,6 +315,8 @@ private:
     std::vector<std::string> gCurrentExternalFiles;
     std::unordered_map<int, std::string> gManualSegments;
     std::unordered_set<std::string> gProcessedFiles;
+    // Export each sub-file as soon as it is parsed and free it (binary export only)
+    bool gStreamSubFiles = true;
     std::unordered_map<std::string, uint32_t> gFileOffsets;
 
     std::unordered_map<std::string, std::vector<char>> gCompanionFiles;

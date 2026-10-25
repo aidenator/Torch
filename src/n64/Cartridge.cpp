@@ -34,6 +34,8 @@ void N64::Cartridge::Initialize() {
             break;
     }
     reader.Close();
+    // Everything needed from the ROM is read now; let go of the copy
+    std::vector<uint8_t>().swap(this->gRomData);
 }
 
 const std::string& N64::Cartridge::GetGameTitle() {

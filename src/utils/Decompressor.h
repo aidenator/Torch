@@ -43,4 +43,6 @@ public:
     static bool IsSegmented(uint32_t addr);
 
     static void ClearCache();
+    // Frees one cached chunk, by the offset it was decoded from
+    static void Evict(uint32_t offset);
 };

@@ -379,6 +379,16 @@ bool Decompressor::IsSegmented(uint32_t addr) {
     return false;
 }
 
+void Decompressor::Evict(uint32_t offset) {
+    std::lock_guard<std::mutex> lock(gDecompCacheMutex);
+    auto it = gCachedChunks.find(offset);
+    if (it != gCachedChunks.end()) {
+        free(it->second->data);
+        delete it->second;
+        gCachedChunks.erase(it);
+    }
+}
+
 void Decompressor::ClearCache() {
     std::lock_guard<std::mutex> lock(gDecompCacheMutex);
     for (auto& [key, value] : gCachedChunks) {

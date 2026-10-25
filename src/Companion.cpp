@@ -1005,7 +1005,11 @@ void Companion::ProcessExportFile() {
             }
         }
 
-        this->gWriteMap[this->gCurrentFile][result.type].push_back(wEntry);
+        // Only code and header exports read these back; a binary export would just keep a copy of
+        // every file it wrote
+        if (this->gConfig.exporterType != ExportType::Binary) {
+            this->gWriteMap[this->gCurrentFile][result.type].push_back(wEntry);
+        }
     }
 
     auto fsout = fs::path(this->gConfig.outputPath);
@@ -1657,7 +1661,7 @@ void Companion::Process(std::atomic<size_t>& assetCount) {
                     wrapper = new SWrapper(this->gConfig.outputPath);
                     break;
                 case ArchiveType::O2R:
-                    wrapper = new ZWrapper(this->gConfig.outputPath);
+                    wrapper = new ZWrapper(this->gConfig.outputPath, this->gConfig.storeUncompressed);
                     break;
                 default:
                     throw std::runtime_error("Invalid archive type for export type Binary");
@@ -2555,6 +2559,24 @@ std::optional<YAML::Node> Companion::AddSubFileAsset(YAML::Node asset, std::stri
     }
 
     auto result = this->AddAsset(asset);
+
+    // A binary archive needs nothing from a sub-file once it is written, so export it now and
+    // free its parse results instead of holding every sub-file until the end.
+    if (StreamsSubFiles()) {
+        auto oldDirectory = this->gCurrentDirectory;
+        this->gCurrentDirectory = oldDirectory / newFileName;
+        try {
+            ProcessExportFile();
+        } catch (const std::exception& e) {
+            SPDLOG_ERROR("Sub-file export failed {}: {}", newFileName, e.what());
+        } catch (...) { SPDLOG_ERROR("Sub-file export crashed {}", newFileName); }
+        this->gProcessedFiles.insert(newFileName);
+        this->gParseResults.erase(newFileName);
+        this->gAddrMap.erase(newFileName);
+        this->gNodesByTypeCache.erase(newFileName);
+        this->gNodesByTypeCacheValid.erase(newFileName);
+        this->gCurrentDirectory = oldDirectory;
+    }
 
     // ...and put the parent file's state back the way we found it.
     this->gCurrentFile = oldFile;

@@ -269,7 +269,15 @@ static std::string ResolveLangRegion() {
 
 std::optional<std::shared_ptr<IParsedData>> BKAssetFactory::parse(std::vector<uint8_t>& buffer, YAML::Node& node) {
     auto [_, segment] = Decompressor::AutoDecode(node, buffer);
-    LUS::BinaryReader reader(segment.data, segment.size);
+    // The segment runs to the end of the ROM, and the reader copies what it is given, so hand it
+    // only the table: a count, a padding word, then 8 bytes per asset
+    size_t tableSize = segment.size;
+    if (segment.size >= 4) {
+        const uint32_t tableCount = (segment.data[0] << 24) | (segment.data[1] << 16) | (segment.data[2] << 8) |
+                                    segment.data[3];
+        tableSize = std::min<size_t>(segment.size, 8 + static_cast<size_t>(tableCount) * 8);
+    }
+    LUS::BinaryReader reader(segment.data, tableSize);
     const auto offset = GetSafeNode<uint32_t>(node, "offset");
     bool symbolMapExists = false;
     if (node["symbol_map"]) {
@@ -350,7 +358,9 @@ std::optional<std::shared_ptr<IParsedData>> BKAssetFactory::parse(std::vector<ui
         uint32_t size;
     };
     std::vector<DecompJob> decompJobs;
-    for (uint32_t i = 0; i < assetCount - 1; i++) {
+    // When sub-files are streamed, each asset is decoded just before it is written and freed
+    // after, so warming the cache would only hold every asset in memory at once.
+    for (uint32_t i = 0; i < assetCount - 1 && !Companion::Instance->StreamsSubFiles(); i++) {
         auto& ai = assetTableInfo.at(i);
         if (ai.tFlag == 4 || ai.compressionFlag == 0)
             continue;
@@ -594,6 +604,10 @@ std::optional<std::shared_ptr<IParsedData>> BKAssetFactory::parse(std::vector<ui
                 default:
                     // We assigned assetType ourselves, so getting here means a bug.
                     throw std::runtime_error("Invalid BKAsset Type Found");
+            }
+            // Already written to the archive, so its decompressed data is not needed again
+            if (Companion::Instance->StreamsSubFiles() && compressionType == CompressionType::BKZIP) {
+                Decompressor::Evict(assetOffset);
             }
         } catch (const std::exception& e) {
             parseFailures++;
