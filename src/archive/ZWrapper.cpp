@@ -83,7 +83,10 @@ int32_t ZWrapper::CreateArchive() {
     }
     // Writes already arrive in large blocks
     setvbuf(this->mFile, nullptr, _IONBF, 0);
-    this->mWindow.reserve(2 * kBlockSize);
+    // Room, set aside while the heap is still in one piece, for the unwritten block and the central
+    // directory miniz writes at the end in one go (1.5 MB for Banjo-Kazooie's 17,500 files): by then
+    // an Old 3DS's heap is in thousands of small pieces, with no 2.5 MB block left to grow into
+    this->mWindow.reserve(4 * kBlockSize);
     this->mArchive = new mz_zip_archive();
     this->mArchive->m_pWrite = WriteAt;
     this->mArchive->m_pIO_opaque = this;

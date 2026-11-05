@@ -14,8 +14,9 @@ enum class CountryCode {
 
 class Cartridge {
 public:
+    // romData must outlive Initialize; it isn't copied, as a ROM can be most of a console's memory
     explicit Cartridge(const std::vector<uint8_t>& romData)
-      : gRomData(romData), gCountryCode(CountryCode::Unknown), gVersion(0), gGameTitle("Unknown"), gRomCRC(0) {
+      : gRomData(&romData), gCountryCode(CountryCode::Unknown), gVersion(0), gGameTitle("Unknown"), gRomCRC(0) {
   }
   void Initialize();
     const std::string& GetGameTitle();
@@ -25,7 +26,7 @@ public:
     std::string GetHash();
     uint32_t GetCRC();
 private:
-    std::vector<uint8_t> gRomData;
+    const std::vector<uint8_t>* gRomData;
     CountryCode gCountryCode;
     uint8_t gVersion;
     std::string gGameTitle;
