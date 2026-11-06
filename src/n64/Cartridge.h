@@ -18,7 +18,8 @@ public:
     explicit Cartridge(const std::vector<uint8_t>& romData)
       : gRomData(&romData), gCountryCode(CountryCode::Unknown), gVersion(0), gGameTitle("Unknown"), gRomCRC(0) {
   }
-  void Initialize();
+    // knownHash: the ROM's SHA-1, if the caller already has it; hashing a ROM takes seconds on a 3DS
+    void Initialize(const std::string& knownHash = "");
     const std::string& GetGameTitle();
     std::string GetCountryCode();
     CountryCode GetCountry();

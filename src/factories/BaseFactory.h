@@ -2,7 +2,11 @@
 
 #include "ResourceType.h"
 #include "n64/Cartridge.h"
+#include <cerrno>
 #include <cstdint>
+#include <cstdlib>
+#include <limits>
+#include <type_traits>
 #include <iostream>
 #include <any>
 #include <memory>
@@ -52,18 +56,57 @@ enum class ExportType {
     XML
 };
 
+// node.as<T>(), without the std::stringstream yaml-cpp builds for every number. That stream and
+// its locale were about a seventh of making bk.o2r on a 3DS. Only a whole-string integer that fits
+// takes the quick path; anything else goes to yaml-cpp, so the results are the same.
 template<typename T>
-std::optional<T> GetNode(YAML::Node& node, const std::string& key) {
-    if(!node[key]) {
-        return std::nullopt;
+T NodeAs(const YAML::Node& node) {
+    if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool> && sizeof(T) > 1) {
+        if (node.IsScalar()) {
+            const std::string& text = node.Scalar();
+            // yaml-cpp reads with no base set, as strtol's base 0 does: 0x is hex, a leading 0 octal
+            const bool negative = !text.empty() && text[0] == '-';
+            const size_t first = negative ? 1 : 0;
+            // Newer C libraries also read 0b as binary, which yaml-cpp doesn't
+            const bool binary = first + 1 < text.size() && text[first] == '0' &&
+                                (text[first + 1] == 'b' || text[first + 1] == 'B');
+            if (first < text.size() && text[first] >= '0' && text[first] <= '9' && !binary &&
+                (std::is_signed_v<T> || !negative)) {
+                char* end = nullptr;
+                errno = 0;
+                if constexpr (std::is_signed_v<T>) {
+                    const long long value = std::strtoll(text.c_str(), &end, 0);
+                    if (errno == 0 && end == text.c_str() + text.size() &&
+                        value >= (std::numeric_limits<T>::min)() && value <= (std::numeric_limits<T>::max)()) {
+                        return static_cast<T>(value);
+                    }
+                } else {
+                    const unsigned long long value = std::strtoull(text.c_str(), &end, 0);
+                    if (errno == 0 && end == text.c_str() + text.size() && value <= (std::numeric_limits<T>::max)()) {
+                        return static_cast<T>(value);
+                    }
+                }
+            }
+        }
     }
-
-    return std::optional<T>(node[key].as<T>());
+    return node.as<T>();
 }
 
 template<typename T>
+std::optional<T> GetNode(YAML::Node& node, const std::string& key) {
+    const auto value = node[key];
+    if(!value) {
+        return std::nullopt;
+    }
+
+    return std::optional<T>(NodeAs<T>(value));
+}
+
+// Each node[key] searches the map and allocates a node, so it's looked up once
+template<typename T>
 T GetSafeNode(YAML::Node& node, const std::string& key) {
-    if(!node[key]) {
+    const auto value = node[key];
+    if(!value) {
         auto dump = YAML::Dump(node);
 
         if (node["symbol"]) {
@@ -73,16 +116,17 @@ T GetSafeNode(YAML::Node& node, const std::string& key) {
         }
     }
 
-    return node[key].as<T>();
+    return NodeAs<T>(value);
 }
 
 template<typename T>
 T GetSafeNode(YAML::Node& node, const std::string& key, const T& def) {
-    if(!node[key]) {
+    const auto value = node[key];
+    if(!value) {
         return def;
     }
 
-    return node[key].as<T>();
+    return NodeAs<T>(value);
 }
 
 class IParsedData{};

@@ -155,7 +155,7 @@ public:
     explicit Companion(std::vector<uint8_t> rom, const ArchiveType otr, const bool debug, const bool modding = false,
                        const std::string& srcDir = "", const std::string& destPath = "") : gCartridge(nullptr),
                        gSourceDirectory(srcDir), gDestinationDirectory(destPath) {
-        this->gRomData = rom;
+        this->gRomData = std::move(rom);
         this->gConfig.otrMode = otr;
         this->gConfig.debug = debug;
         this->gConfig.modding = modding;
@@ -164,6 +164,8 @@ public:
     }
 
     void SetRomPath(std::filesystem::path path) { this->gRomPath = std::move(path); }
+    // The SHA-1 of the ROM passed in, if the caller has already worked it out
+    void SetRomHash(std::string hash) { this->gRomHash = std::move(hash); }
 
     explicit Companion(std::filesystem::path rom, const ArchiveType otr, const bool debug, const std::string& srcDir = "", const std::string& destPath = "") :
                        Companion(rom, otr, debug, false, srcDir, destPath) {}
@@ -301,6 +303,7 @@ private:
     bool gNodeForceProcessing = false;
     bool gIndividualIncludes = false;
     YAML::Node gHashNode;
+    std::string gRomHash;
     std::shared_ptr<N64::Cartridge> gCartridge;
     std::string gGameTitle;
     std::unordered_map<std::string, std::vector<YAML::Node>> gCourseMetadata;

@@ -3,7 +3,7 @@
 #include "lib/binarytools/BinaryReader.h"
 #include <Companion.h>
 
-void N64::Cartridge::Initialize() {
+void N64::Cartridge::Initialize(const std::string& knownHash) {
     // Read straight from the ROM: a BinaryReader would copy all of it
     const std::vector<uint8_t>& rom = *this->gRomData;
     auto byteAt = [&rom](size_t offset) -> uint8_t { return offset < rom.size() ? rom[offset] : 0; };
@@ -21,7 +21,7 @@ void N64::Cartridge::Initialize() {
     }
     uint8_t country = byteAt(0x3E);
     this->gVersion = byteAt(0x3F);
-    this->gHash = Companion::CalculateHash(rom);
+    this->gHash = knownHash.empty() ? Companion::CalculateHash(rom) : knownHash;
     switch (country) {
         case 'J':
             this->gCountryCode = CountryCode::Japan;

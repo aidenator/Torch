@@ -1384,7 +1384,8 @@ void Companion::Process(std::atomic<size_t>& assetCount) {
         }
 
         this->gCartridge = std::make_shared<N64::Cartridge>(this->gRomData);
-        this->gCartridge->Initialize();
+        // A ROM path is read here, so a hash set beforehand could be for other data
+        this->gCartridge->Initialize(this->gRomPath.has_value() ? "" : this->gRomHash);
         this->gGameTitle = this->gCartridge->GetGameTitle();
 
         if (!config[this->gCartridge->GetHash()]) {
