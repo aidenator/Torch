@@ -271,8 +271,10 @@ public:
     const std::unordered_map<std::string, std::string>& GetModdedAssetPaths() const { return this->gModdedAssetPaths; }
 
     std::optional<std::tuple<std::string, YAML::Node>> RegisterAsset(const std::string& name, YAML::Node& node);
-    std::optional<YAML::Node> AddSubFileAsset(YAML::Node asset, std::string newFileName, CompressionType newCompressionType, uint32_t compressedSize = 0);
-    std::optional<YAML::Node> AddAsset(YAML::Node asset);
+    // By reference: a YAML::Node copy updates atomic reference counts, slow on the 3DS. A node is a
+    // handle, so a copy would change the same node anyway
+    std::optional<YAML::Node> AddSubFileAsset(YAML::Node& asset, std::string newFileName, CompressionType newCompressionType, uint32_t compressedSize = 0);
+    std::optional<YAML::Node> AddAsset(YAML::Node& asset);
     std::string GetCurrentDirectory() const { return gCurrentDirectory.generic_string(); }
     void SetCompressedSegment(uint32_t segmentId, uint32_t compressedFileOffset, uint32_t offset);
     bool GetCompressedSegmentOffset(uint32_t* addr);

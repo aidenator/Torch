@@ -536,8 +536,17 @@ std::optional<std::shared_ptr<IParsedData>> DListFactory::parse(std::vector<uint
 
     auto count = GetSafeNode<int32_t>(node, "count", -1);
     auto [_, segment] = Decompressor::AutoDecode(node, raw_buffer);
-    LUS::BinaryReader reader(segment.data, segment.size);
-    reader.SetEndianness(Torch::Endianness::Big);
+    // Read the words in place: a BinaryReader copies the whole rest of the segment, which was
+    // 1.5 GB over a Banjo-Kazooie archive, for display lists that are mostly a few hundred bytes
+    size_t position = 0;
+    auto readWord = [&segment, &position]() -> uint32_t {
+        const uint8_t* bytes = segment.data + position;
+        position += sizeof(uint32_t);
+        return (uint32_t)bytes[0] << 24 | (uint32_t)bytes[1] << 16 | (uint32_t)bytes[2] << 8 | bytes[3];
+    };
+
+    // Read once: a lookup compares every key as a string, and this was done per G_DL command
+    const uint32_t dlOffset = GetSafeNode<uint32_t>(node, "offset");
 
     std::vector<uint32_t> gfxs;
     auto processing = true;
@@ -546,16 +555,15 @@ std::optional<std::shared_ptr<IParsedData>> DListFactory::parse(std::vector<uint
     while (processing) {
         // Some DLs can jump to offsets that never reach a G_ENDDL; stop at
         // the buffer edge instead of reading past it and synthesize the terminator.
-        if (reader.GetBaseAddress() + 2 * sizeof(uint32_t) > segment.size) {
-            SPDLOG_WARN("DL at 0x{:X} ran off the end of its buffer without G_ENDDL; truncating",
-                        GetSafeNode<uint32_t>(node, "offset"));
+        if (position + 2 * sizeof(uint32_t) > segment.size) {
+            SPDLOG_WARN("DL at 0x{:X} ran off the end of its buffer without G_ENDDL; truncating", dlOffset);
             gfxs.push_back(static_cast<uint32_t>(GBI(G_ENDDL)) << 24);
             gfxs.push_back(0);
             break;
         }
 
-        auto w0 = reader.ReadUInt32();
-        auto w1 = reader.ReadUInt32();
+        auto w0 = readWord();
+        auto w1 = readWord();
 
         uint8_t opcode = w0 >> 24;
 
@@ -569,7 +577,7 @@ std::optional<std::shared_ptr<IParsedData>> DListFactory::parse(std::vector<uint
                 processing = false;
             }
 
-            if (SEGMENT_NUMBER(node["offset"].as<uint32_t>()) == SEGMENT_NUMBER(w1)) {
+            if (SEGMENT_NUMBER(dlOffset) == SEGMENT_NUMBER(w1)) {
                 std::optional<uint32_t> segment;
 
                 YAML::Node gfx;

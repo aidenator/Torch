@@ -2003,7 +2003,8 @@ void Companion::Pack(const std::string& folder, const std::string& output, const
 }
 
 std::optional<std::tuple<std::string, YAML::Node>> Companion::RegisterAsset(const std::string& name, YAML::Node& node) {
-    if (!node["offset"]) {
+    const auto offsetNode = node["offset"];
+    if (!offsetNode) {
         return std::nullopt;
     }
 
@@ -2011,7 +2012,7 @@ std::optional<std::tuple<std::string, YAML::Node>> Companion::RegisterAsset(cons
     std::replace(output.begin(), output.end(), '\\', '/');
 
     auto entry = std::make_tuple(output, node);
-    this->gAddrMap[this->gCurrentFile][node["offset"].as<uint32_t>()] = entry;
+    this->gAddrMap[this->gCurrentFile][NodeAs<uint32_t>(offsetNode)] = entry;
     // Append to the GetNodesByType cache for this (file, type) if it's already
     // built. Avoids a full rebuild on the hot DListFactory path where many new
     // VTX nodes are registered while parsing a single display list.
@@ -2581,9 +2582,11 @@ std::vector<char> Companion::ParseVersionString(const std::string& version) {
     return wv.ToVector();
 }
 
-std::optional<YAML::Node> Companion::AddSubFileAsset(YAML::Node asset, std::string newFileName,
+std::optional<YAML::Node> Companion::AddSubFileAsset(YAML::Node& asset, std::string newFileName,
                                                      CompressionType newCompressionType, uint32_t compressedSize) {
-    if (!asset["offset"] || !asset["type"]) {
+    // Each lookup compares every key as a string, so "offset" is looked up once
+    auto offsetNode = asset["offset"];
+    if (!offsetNode || !asset["type"]) {
         return std::nullopt;
     }
 
@@ -2592,8 +2595,8 @@ std::optional<YAML::Node> Companion::AddSubFileAsset(YAML::Node asset, std::stri
         return std::nullopt;
     }
 
-    auto addr = GetSafeNode<uint32_t>(asset, "offset");
-    asset["offset"] = 0;
+    auto addr = NodeAs<uint32_t>(offsetNode);
+    offsetNode = 0;
 
     auto oldFile = this->gCurrentFile;
     auto oldVram = this->gCurrentVram;
@@ -2656,13 +2659,15 @@ std::optional<YAML::Node> Companion::AddSubFileAsset(YAML::Node asset, std::stri
     return result;
 }
 
-std::optional<YAML::Node> Companion::AddAsset(YAML::Node asset) {
-    if (!asset["offset"] || !asset["type"]) {
+std::optional<YAML::Node> Companion::AddAsset(YAML::Node& asset) {
+    // Each lookup compares every key as a string, so "offset" is looked up once
+    auto offsetNode = asset["offset"];
+    if (!offsetNode || !asset["type"]) {
         return std::nullopt;
     }
-    asset["offset"] = PatchVirtualAddr(GetSafeNode<uint32_t>(asset, "offset"));
+    const auto offset = PatchVirtualAddr(NodeAs<uint32_t>(offsetNode));
+    offsetNode = offset;
     const auto type = GetTypeNode(asset);
-    const auto offset = GetSafeNode<uint32_t>(asset, "offset");
     const auto symbol = GetSafeNode<std::string>(asset, "symbol", "");
     const auto decl = this->GetNodeByAddr(offset);
 
